@@ -1,0 +1,267 @@
+<style>
+  #test {
+    margin: 1em 0;
+  }
+  [hidden] {
+    display: none !important;
+  }
+
+  .pagination-nav-buttons {
+    text-align: center !important;
+  }
+
+  h2.header-campaign-list,
+  h2.header-dropdown {
+    padding-left: 0 !important;
+  }
+
+  .campaign-dropdown {
+    display: flex !important;
+    min-height: 0 !important;
+    margin: 1em 0 !important;
+  }
+
+</style>
+
+<div id="test">
+  <hr>
+  <div class="ui stackable grid">
+    <div class="five wide column">
+      <h2 class="ui header header-campaign-list">Available Campaigns</h2>
+      <div class="ui middle aligned divided list" id="campaign-list">
+        <!-- <div class="item">
+        <div class="right floated content">
+        <button class="ui button button-add-campaign" type="button">
+        Add
+      </button>
+    </div>
+    <div class="content">
+    Campaign
+  </div>
+</div> -->
+      </div>
+      <div class="ui buttons pagination-nav-buttons">
+        <button class="ui icon button" id="button-last-page" type="button" hidden>
+          <i class="left chevron icon"></i>
+        </button>
+        <button class="ui icon button" id="button-next-page" type="button" hidden>
+          <i class="right chevron icon"></i>
+        </button>
+      </div>
+    </div>
+    <div class="five wide column">
+      <h2 class="ui header header-dropdown">Find Campaign</h2>
+      <div class="ui search selection dropdown campaign-dropdown">
+        <input type="hidden" name="campaigns" id="campaign-selected">
+        <i class="dropdown icon"></i>
+        <input class="search" id="campaign-search" autocomplete="off" tabindex="0">
+        <div class="default text">Enter Campaign Name</div>
+        <div class="menu" id="campaign-menu">
+          <!-- <div class="item" data-value="male">Male</div> -->
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function ($) {
+    // Get login username and password from wp_options
+    var email = '<?php echo get_option( "reach_login_email" ); ?>';
+    var password = '<?php echo get_option( "reach_login_password" ); ?>';
+    var authToken = "";
+    var personId = -2;
+    var apiUrl = "https://reach.thrinacia.com/api/";
+    var apiAuthenticateUrl = apiUrl + "service/restv1/authenticate/";
+    var apiCampaignUrl = apiUrl + "service/restv1/campaign/";
+    var campaignParam = {
+      "name": "",
+      "person_id": -2
+    };
+    var currentPage = 1;
+    var totalEntries = 0;
+    var pageEntry = 10;
+    var lastPageBtn,
+      nextPageBtn,
+      addCampaignBtns;
+    var stringCampaignId = "campaign-id";
+
+    login();
+
+    $(document).ready(function () {
+      $(".campaign-dropdown").dropdown();
+
+      var domCampaignSearch = document.getElementById("campaign-search");
+      domCampaignSearch.addEventListener("input", function (evt) {
+        var value = evt.target.value;
+        campaignParam.name = value;
+        getCampaignWithName();
+      });
+
+      lastPageBtn = document.getElementById("button-last-page");
+      lastPageBtn.addEventListener("click", function (event) {
+        goToLastPage();
+      });
+
+      nextPageBtn = document.getElementById("button-next-page");
+      nextPageBtn.addEventListener("click", function (event) {
+        goToNextPage();
+      });
+    });
+
+    function login() {
+      var param = {
+        "email": email,
+        "password": password
+      };
+      $.post(apiAuthenticateUrl, param, function (data) {
+        authToken = data.auth_token;
+        campaignParam.person_id = data.id;
+        getCampaignWithName();
+        getListCampaigns();
+      });
+    }
+
+    function getCampaignWithName() {
+      var filters = {
+        "name": campaignParam.name,
+        "manager": campaignParam.person_id
+      };
+      var pages = {
+        "page_entries": pageEntry,
+        "sort": "-created"
+      };
+
+      var apiCampaignUrlWithFilters = apiCampaignUrl + "?filters=" + JSON.stringify(filters);
+      $.ajax({
+        url: apiCampaignUrlWithFilters,
+        data: pages,
+        crossDomain: true,
+        headers: {
+          "X-Auth-Token": authToken
+        }
+      }).done(function (data) {
+        setCampaignItemInDropdown(data);
+      });
+    }
+
+    function setCampaignItemInDropdown(campaigns) {
+      if (campaigns && campaigns.length) {
+        var menu = document.getElementById("campaign-menu");
+        menu.innerHTML = null;
+        for (var index in campaigns) {
+          var campaign = campaigns[index];
+          var item = document.createElement("div");
+          item.className = "item campaign-item";
+          item.style.fontSize = "inherit";
+
+          item.setAttribute(stringCampaignId, campaign.id);
+          item.innerHTML = campaign.name;
+          item.addEventListener("click", function (event) {
+            var id = event.target.attributes[stringCampaignId].value;
+            setWidget(id);
+          });
+          menu.appendChild(item);
+        }
+      }
+    }
+
+    function getListCampaigns() {
+      var filters = {
+        "manager": campaignParam.person_id
+      };
+      var pages = {
+        "page": currentPage,
+        "page_entries": pageEntry,
+        "sort": "-created"
+      };
+
+      var apiCampaignUrlWithFilters = apiCampaignUrl + "?filters=" + JSON.stringify(filters);
+      $.ajax({
+        url: apiCampaignUrlWithFilters,
+        data: pages,
+        crossDomain: true,
+        headers: {
+          "X-Auth-Token": authToken
+        }
+      }).done(function (data, status, xhr) {
+        totalEntries = xhr.getResponseHeader("X-Pager-Total-Entries");
+        checkEntriesAmount();
+        addItemToList(data);
+
+        addCampaignBtns = document.getElementsByClassName("button-add-campaign");
+        Array.prototype.forEach.call(addCampaignBtns, function (button) {
+          button.addEventListener("click", function (event) {
+            addCampaign(event);
+          });
+        });
+      });
+    }
+
+    function addItemToList(campaignResp) {
+      var list = document.getElementById("campaign-list");
+      list.innerHTML = null;
+      for (var i in campaignResp) {
+        var campaign = campaignResp[i];
+        var rightContent = document.createElement("div");
+        rightContent.className = "right floated content";
+        var addButton = document.createElement("button");
+        addButton.className = "ui button button-add-campaign";
+        addButton.setAttribute("type", "button");
+        addButton.setAttribute(stringCampaignId, campaign.id);
+        addButton.innerText = "Insert";
+        rightContent.appendChild(addButton);
+
+        var item = document.createElement("div");
+        item.className = "item";
+
+        var content = document.createElement("div");
+        content.innerText = campaign.name;
+
+        item.appendChild(rightContent);
+        item.appendChild(content);
+
+        list.appendChild(item);
+      }
+    }
+
+    function goToLastPage() {
+      currentPage -= 1;
+      getListCampaigns();
+    }
+
+    function goToNextPage() {
+      currentPage += 1;
+      getListCampaigns();
+    }
+
+    function checkEntriesAmount() {
+      if (currentPage == 1) {
+        lastPageBtn.setAttribute("hidden", "");
+      } else {
+        lastPageBtn.removeAttribute("hidden");
+      }
+
+      if (totalEntries > currentPage * pageEntry) {
+        nextPageBtn.removeAttribute("hidden");
+      } else {
+        nextPageBtn.setAttribute("hidden", "");
+      }
+    }
+
+    function addCampaign(event) {
+      setWidget(event.target.attributes[stringCampaignId].value);
+    }
+
+    function setWidget(campaignId) {
+      var widgetShortCode = "[thrinacia-widget id='" + campaignId + "' themecolor='#00B5AD' fontcolor='#313131']";
+      var editor = parent.tinyMCE.activeEditor;
+      if (editor == null || editor.isHidden()) {
+        var textArea = document.getElementById("content");
+        textArea.value += widgetShortCode;
+      } else {
+        editor.setContent(editor.getContent() + widgetShortCode);
+      }
+    }
+  })(jQuery);
+</script>
